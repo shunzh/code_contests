@@ -19,11 +19,15 @@ Example usage:
 """
 
 import io
+import json
+import os
 import sys
 
 import riegeli
 
 import contest_problem_pb2
+
+from google.protobuf.json_format import MessageToJson
 
 
 def _all_problems(filenames):
@@ -35,12 +39,56 @@ def _all_problems(filenames):
 
 
 def _print_names_and_sources(filenames):
-  """Prints the names and sources of all ContestProblems in filenames."""
+    """Prints the names and sources of all ContestProblems in filenames."""
+    for problem in _all_problems(filenames):
+        print(
+            contest_problem_pb2.ContestProblem.Source.Name(problem.source),
+            problem.name)
+
+
+# mapping between saved file name and program attribute
+mapping = [("public_test_cases.json", 'publicTests'),
+           ("private_test_cases.json", 'privateTests'),
+           ("generated_test_cases.json", 'generatedTests'),
+           ("solutions.json", 'solutions'),
+           ("question.txt", 'description')]
+
+def _process_input_output(test_cases):
+    """
+    this dataset contains test cases as [{input, output}, {input, output}, ...]
+    need it to be {'inputs': [input, input, ...], 'outputs': [output, output...]}
+    """
+    inputs = []
+    outputs = []
+    for datum in test_cases:
+        inputs.append(datum['input'])
+        outputs.append(datum['output'])
+    return {'inputs': inputs, 'outputs': outputs}
+
+def _convert_to_apps_format(filenames, save_dir):
+  os.makedirs(save_dir, exist_ok=True)
+
   for problem in _all_problems(filenames):
-    print(
-        contest_problem_pb2.ContestProblem.Source.Name(problem.source),
-        problem.name)
+    prob_path = os.path.join(save_dir, str(problem.name)) # use problem name as path name
+    os.makedirs(prob_path, exist_ok=True)
+
+    problem = json.loads(MessageToJson(problem))
+
+    for filename, attribute in mapping:
+      if attribute in problem.keys():
+        print(f'saving {attribute}')
+
+        file_path = os.path.join(prob_path, filename)
+
+        if attribute in ['publicTests', 'privateTests', 'generatedTests']:
+          problem[attribute] = _process_input_output(problem[attribute])
+
+        with open(file_path, 'w') as f:
+          json.dump(problem[attribute], f)
+      else:
+        print(f"problem {problem['source']} does not have attribute {attribute}")
 
 
 if __name__ == '__main__':
-  _print_names_and_sources(sys.argv[1:])
+  #_print_names_and_sources(sys.argv[1:])
+  _convert_to_apps_format(sys.argv[1:], save_dir='/u/shunzhang/code_contests/CodeContests')
