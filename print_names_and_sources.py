@@ -31,11 +31,11 @@ from google.protobuf.json_format import MessageToJson
 
 
 def _all_problems(filenames):
-  """Iterates through all ContestProblems in filenames."""
-  for filename in filenames:
-    reader = riegeli.RecordReader(io.FileIO(filename, mode='rb'),)
-    for problem in reader.read_messages(contest_problem_pb2.ContestProblem):
-      yield problem
+    """Iterates through all ContestProblems in filenames."""
+    for filename in filenames:
+        reader = riegeli.RecordReader(io.FileIO(filename, mode='rb'), )
+        for problem in reader.read_messages(contest_problem_pb2.ContestProblem):
+            yield problem
 
 
 def _print_names_and_sources(filenames):
@@ -46,14 +46,7 @@ def _print_names_and_sources(filenames):
             problem.name)
 
 
-# mapping between saved file name and program attribute
-mapping = [("public_test_cases.json", 'publicTests'),
-           ("private_test_cases.json", 'privateTests'),
-           ("generated_test_cases.json", 'generatedTests'),
-           ("solutions.json", 'solutions'),
-           ("question.txt", 'description')]
-
-def _process_input_output(test_cases):
+def _transpose_input_output(test_cases):
     """
     this dataset contains test cases as [{input, output}, {input, output}, ...]
     need it to be {'inputs': [input, input, ...], 'outputs': [output, output...]}
@@ -65,30 +58,66 @@ def _process_input_output(test_cases):
         outputs.append(datum['output'])
     return {'inputs': inputs, 'outputs': outputs}
 
+def _aggregate_test_cases(problem):
+    """
+    split all test cases into training and test sets
+    """
+    training_set = []
+    if 'publicTests' in problem.keys():
+        training_set += problem['publicTests']
+    if 'generatedTests' in problem.keys():
+        training_set += problem['generatedTests']
+
+    test_set = []
+    if 'privateTests' in problem.keys():
+        test_set = problem['privateTests']
+
+    return training_set, test_set
+
+
 def _convert_to_apps_format(filenames, save_dir):
-  os.makedirs(save_dir, exist_ok=True)
+    os.makedirs(save_dir, exist_ok=True)
 
-  for problem in _all_problems(filenames):
-    prob_path = os.path.join(save_dir, str(problem.name)) # use problem name as path name
-    os.makedirs(prob_path, exist_ok=True)
+    mapping = [("solutions.json", 'solutions'),
+               ("question.txt", 'description'),
+               ("public_test_cases.json", 'publicTests'), # these original are saved for reference
+               ("private_test_cases.json", 'privateTests'),
+               ("generated_test_cases.json", 'generatedTests'),
+               ("input_output.json", 'input_outputs') # converted format for apps
+              ]
 
-    problem = json.loads(MessageToJson(problem))
+    for problem in _all_problems(filenames):
+        name = str(contest_problem_pb2.ContestProblem.Source.Name(problem.source)) + ' ' + str(problem.name)
+        print(name)
 
-    for filename, attribute in mapping:
-      if attribute in problem.keys():
-        print(f'saving {attribute}')
+        prob_path = os.path.join(save_dir, str(name)) # use problem name as path name
+        os.makedirs(prob_path, exist_ok=True)
 
-        file_path = os.path.join(prob_path, filename)
+        problem = json.loads(MessageToJson(problem))
 
-        if attribute in ['publicTests', 'privateTests', 'generatedTests']:
-          problem[attribute] = _process_input_output(problem[attribute])
+        training_set, test_set = _aggregate_test_cases(problem)
+        input_outputs = _transpose_input_output(training_set + test_set)
+        input_outputs.update({'train_set_size': len(training_set), 'test_set_size ': len(test_set)})
+        problem['input_outputs'] = input_outputs
 
-        with open(file_path, 'w') as f:
-          json.dump(problem[attribute], f)
-      else:
-        print(f"problem {problem['source']} does not have attribute {attribute}")
+        for filename, attribute in mapping:
+            if attribute in problem.keys():
+                file_path = os.path.join(prob_path, filename)
+
+                extension = os.path.splitext(file_path)[1]
+
+                if extension == '.txt':
+                    with open(file_path, 'w') as f:
+                        f.write(problem[attribute])
+                elif extension == '.json':
+                    with open(file_path, 'w') as f:
+                        json.dump(problem[attribute], f)
+                else:
+                    raise Exception(f"Unknown extension {extension}")
+            else:
+                print(f"problem {problem['source']} does not have attribute {attribute}")
 
 
 if __name__ == '__main__':
-  #_print_names_and_sources(sys.argv[1:])
-  _convert_to_apps_format(sys.argv[1:], save_dir='/u/shunzhang/code_contests/CodeContests')
+    # _print_names_and_sources(sys.argv[1:])
+    _convert_to_apps_format(sys.argv[1:], save_dir='/u/shunzhang/code_contests/CodeContests/train')
